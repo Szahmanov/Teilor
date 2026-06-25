@@ -88,14 +88,14 @@
     const [jobco,cvData]=await Promise.all([
       safe(()=>groqJSON([
         {role:"system",content:"Expert recruiter. Extract a job posting AND read the company behind it. JSON only."},
-        {role:"user",content:`Return JSON: role_title, company (name if present else "the company"), seniority, must_have (array), nice_to_have (array), keywords (array of ATS keywords a screener scans for), hard_skills (array), soft_skills (array), responsibilities (array), red_flags (array, may be empty), company:{culture, communication_style, priorities (array), tone_recommendation, tone_reason}.\n\nPOSTING:\n${job}`}
+        {role:"user",content:`Return JSON: role_title, company_name (string — company name if present in posting, else "the company"), seniority, must_have (array), nice_to_have (array), keywords (array of ATS keywords a screener scans for), hard_skills (array), soft_skills (array), responsibilities (array), red_flags (array, may be empty), company:{culture, communication_style, priorities (array), tone_recommendation, tone_reason}.\n\nPOSTING:\n${job}`}
       ],{temperature:0.2})),
       safe(()=>groqJSON([
         {role:"system",content:"Extract structured facts from a CV. Invent nothing. JSON only."},
         {role:"user",content:`Return JSON: skills (array), hard_skills (array), soft_skills (array), titles (array), domains (array), years_estimate (string), achievements (array of concrete accomplishments, keep numbers), raw_bullets (array of the candidate's real lines), metrics_present (boolean — does the CV contain quantified results).\n\nCV:\n${cv}`}
       ],{temperature:0.2})),
     ]);
-    done.job=!!jobco.role_title; done.company=!!jobco.company; done.cv=!!(cvData.skills||cvData.raw_bullets);
+    done.job=!!jobco.role_title; done.company=!!jobco.company_name; done.cv=!!(cvData.skills||cvData.raw_bullets);
     log("  · "+(jobco.must_have?.length||0)+" must-haves, "+(jobco.keywords?.length||0)+" ATS keywords; CV "+(cvData.skills?.length||0)+" skills");
     stepState("read","done");
 
@@ -169,7 +169,7 @@
     stepState("plan","active");log("\n[6] Interview prep, roadmap & probability");
     const prep=await safe(()=>groqJSON([
       {role:"system",content:"Interview coach. JSON only."},
-      {role:"user",content:`Return JSON: questions (array 5 {q, approach} with STAR approach from the candidate's real experience), recruiter_questions (array of {q, recommended_answer} answering the recruiter's likely concerns using only the real CV), ask_them (array of 3 sharp questions for the candidate to ask).\n\nPOSTING:\n${JSON.stringify(jobco)}\n\nCANDIDATE:\n${JSON.stringify(cvData)}\n\nCONCERNS:\n${JSON.stringify(review.recruiter?.likely_concerns||review.recruiter?.weaknesses||[])}`}
+      {role:"user",content:`Return JSON: questions (array of 5 objects {q, approach} where "approach" is a full 2-3 sentence answer using the STAR method drawn from the candidate's real experience — not just the word STAR), recruiter_questions (array of {q, recommended_answer} — full sentence answers to the recruiter's likely concerns using only the real CV), ask_them (array of 3 strings — sharp questions the candidate should ask the interviewer).\n\nPOSTING:\n${JSON.stringify(jobco)}\n\nCANDIDATE:\n${JSON.stringify(cvData)}\n\nCONCERNS:\n${JSON.stringify(review.recruiter?.likely_concerns||review.recruiter?.weaknesses||[])}`}
     ]));
     done.prep=!!prep.questions;
     const road=await safe(()=>groqJSON([
@@ -222,7 +222,7 @@
       const app={
         id,
         title:analysis.jobco?.role_title||existing?.title||"Untitled role",
-        company:analysis.jobco?.company||existing?.company||"the company",
+        company:analysis.jobco?.company_name||existing?.company||"the company",
         job,cv,
         stageIndex:Math.max(existing?.stageIndex||0,3), // auto-advance to "Interview prep"
         rejected:existing?.rejected||false,
@@ -442,7 +442,7 @@
     let h="";
     if(p.questions?.length){h+=`<h4>Likely questions &amp; how to answer</h4>`;p.questions.forEach(q=>h+=`<div class="qa"><span class="q">${esc(q.q)}</span><p>${esc(q.approach)}</p></div>`);}
     if(p.recruiter_questions?.length){h+=`<h4>Answering the recruiter's concerns</h4>`;p.recruiter_questions.forEach(q=>h+=`<div class="qa"><span class="q">${esc(q.q)}</span><p>${esc(q.recommended_answer)}</p></div>`);}
-    if(p.ask_them?.length)h+=`<h4>Ask the interviewer</h4><ul>${p.ask_them.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`;
+    if(p.ask_them?.length)h+=`<h4>Ask the interviewer</h4><ul>${p.ask_them.map(x=>`<li>${esc(typeof x==="string"?x:x.q||x.question||JSON.stringify(x))}</li>`).join("")}</ul>`;
     $("prepOut").innerHTML=h||"<p>No output.</p>";
   }
   function renderDecisions(d){
