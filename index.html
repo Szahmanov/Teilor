@@ -29,9 +29,7 @@
     </button>
     <div class="topbar-actions">
       <button id="installBtn" class="ghost-btn" hidden>Install</button>
-      <button id="keyBtn" class="ghost-btn" aria-haspopup="dialog">
-        <span class="key-dot" id="keyDot" aria-hidden="true"></span>Settings
-      </button>
+
     </div>
   </header>
 
@@ -270,44 +268,6 @@
     <span>Tailor — a StaGove autonomous agent.</span>
     <span class="foot-dim">Runs on your device with your own free Groq key. No server, no account, nothing stored elsewhere.</span>
   </footer>
-
-  <!-- API key dialog -->
-  <div class="modal" id="keyModal" hidden>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
-      <h2 id="keyTitle">Settings</h2>
-      <p class="modal-lede">
-        Tailor runs on a model hosted on Groq's free tier, configured by whoever deployed this site —
-        you don't need to do anything to start. Choose the model below. Entering your own Groq key is
-        <strong>optional</strong>: do it only if you'd rather not share the site's usage limit. A personal
-        key stays in this browser and is sent only to Groq.
-      </p>
-      <details class="steps-wrap">
-        <summary>Optional — use my own free Groq key</summary>
-        <ol class="steps">
-          <li>Open <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> and sign in.</li>
-          <li>Create an API key and copy it (starts with <code>gsk_</code>).</li>
-          <li>Paste it below.</li>
-        </ol>
-        <label class="micro" for="keyInput">Personal Groq key</label>
-        <input id="keyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false" />
-      </details>
-      <div class="modal-row">
-        <label class="model-select"><span class="micro">Model</span>
-          <select id="modelSelect">
-            <option value="llama-3.3-70b-versatile">Llama 3.3 70B — best quality</option>
-            <option value="llama-3.1-8b-instant">Llama 3.1 8B — fastest</option>
-            <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout — long context</option>
-          </select>
-        </label>
-      </div>
-      <div class="modal-actions">
-        <button id="keyForget" class="text-btn" type="button">Forget key</button>
-        <div><button id="keyCancel" class="ghost-btn" type="button">Cancel</button>
-        <button id="keySave" class="primary-btn" type="button">Save key</button></div>
-      </div>
-      <p class="modal-foot" id="keyStatus"></p>
-    </div>
-  </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <script src="app.js"></script>
