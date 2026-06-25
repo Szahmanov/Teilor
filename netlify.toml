@@ -1,0 +1,14 @@
+# Netlify config for Tailor.
+# Static site served from the repo root; the Groq key lives in an env var
+# (Site settings -> Environment variables -> GROQ_API_KEY) and is only read by
+# the serverless function below — never shipped to the browser.
+
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# Pretty path: the app calls /api/groq, which maps to the function.
+[[redirects]]
+  from = "/api/groq"
+  to = "/.netlify/functions/groq"
+  status = 200

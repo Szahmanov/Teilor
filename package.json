@@ -1,0 +1,15 @@
+{
+  "name": "tailor-stagove",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Tailor — Autonomous Career Application Manager (StaGove). Static PWA + Groq proxy.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

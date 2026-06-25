@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tailor — Autonomous Career Application Manager · StaGove</title>
+  <meta name="description" content="An autonomous AI recruiter that manages every job application — ATS simulation, recruiter review, tailored CV and cover letter, and an improvement roadmap — from the moment you find a job until you receive an offer." />
+  <meta name="theme-color" content="#1F4D3A" />
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="icon" href="favicon-48.png" sizes="48x48" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Tailor" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <button class="brand" id="brandHome" title="Dashboard">
+      <span class="mark" aria-hidden="true">T</span>
+      <span class="wordmark">Tailor<em>Career Application Manager · StaGove</em></span>
+    </button>
+    <div class="topbar-actions">
+      <button id="installBtn" class="ghost-btn" hidden>Install</button>
+      <button id="keyBtn" class="ghost-btn" aria-haspopup="dialog">
+        <span class="key-dot" id="keyDot" aria-hidden="true"></span>Settings
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <section class="view" id="dashboard">
+      <div class="dash-head">
+        <div>
+          <p class="eyebrow">Your career desk</p>
+          <h1>Every application,<br /><span class="accent">managed by one agent.</span></h1>
+          <p class="lede">Tailor isn't a one-time CV tool. Each job becomes a living application your
+            agent keeps improving — ATS-scored, recruiter-reviewed, tracked from <em>found</em> to <em>offer</em>.</p>
+        </div>
+        <button class="primary-btn big" id="newAppBtn">+ New application</button>
+      </div>
+
+      <div class="dash-stats" id="dashStats" hidden></div>
+
+      <div class="app-grid" id="appGrid"></div>
+
+      <div class="empty" id="emptyState">
+        <div class="empty-mark" aria-hidden="true">T</div>
+        <h2>No applications yet</h2>
+        <p>Paste a job posting and your CV. Your agent will build the first one and start tracking it.</p>
+        <button class="primary-btn" id="emptyNewBtn">Create your first application</button>
+      </div>
+    </section>
+
+    <!-- ===================== EDITOR ===================== -->
+    <section class="view" id="editor" hidden>
+      <button class="back-btn" id="editorBack">&larr; Back</button>
+      <p class="eyebrow" id="editorEyebrow">New application</p>
+      <h1 class="editor-title">Give your agent the brief</h1>
+      <p class="lede">Paste the full posting and your CV. The more complete, the sharper every score and rewrite.</p>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="jobInput">The job posting</label>
+          <textarea id="jobInput" rows="11" placeholder="Paste the full job ad — title, company, responsibilities, requirements."></textarea>
+          <div class="field-foot"><span id="jobCount">0</span> characters</div>
+        </div>
+        <div class="field">
+          <label for="cvInput">Your CV / experience</label>
+          <textarea id="cvInput" rows="11" placeholder="Paste your CV, or list roles, achievements and skills. Numbers and dates help."></textarea>
+          <div class="field-foot"><span id="cvCount">0</span> characters</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="runBtn" class="primary-btn">Run my career agent</button>
+        <button id="sampleBtn" class="text-btn" type="button">Try a sample</button>
+      </div>
+
+      <div class="rule" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span>
+      </div>
+
+      <!-- live agent run -->
+      <div class="run" id="run" hidden aria-live="polite">
+        <ol class="pipeline" id="pipeline"></ol>
+      </div>
+    </section>
+
+    <!-- ===================== WORKSPACE ===================== -->
+    <section class="view" id="workspace" hidden>
+      <button class="back-btn" id="wsBack">&larr; All applications</button>
+
+      <div class="ws-head">
+        <div class="ws-title">
+          <h1 id="wsRole">Role</h1>
+          <p id="wsCompany" class="ws-company">Company</p>
+        </div>
+        <div class="ws-actions">
+          <button class="ghost-btn" id="wsImprove">Improve / re-run</button>
+          <button class="ghost-btn danger" id="wsDelete" title="Delete application">Delete</button>
+        </div>
+      </div>
+
+      <!-- stage tracker -->
+      <div class="tracker" id="tracker" aria-label="Application stage"></div>
+      <div class="tracker-foot">
+        <span id="rejectToggle" class="reject-toggle">Mark as rejected</span>
+        <span class="updated" id="wsUpdated"></span>
+      </div>
+
+      <!-- score strip -->
+      <div class="score-strip" id="scoreStrip"></div>
+
+      <!-- jump nav -->
+      <nav class="ws-nav" id="wsNav"></nav>
+
+      <div class="panels" id="panels">
+
+        <article class="panel" id="p-summary">
+          <header class="panel-head"><h2>Autonomous work summary</h2></header>
+          <p class="panel-note">What your agent did on this run, without you steering it.</p>
+          <ul class="task-list" id="taskList"></ul>
+        </article>
+
+        <article class="panel" id="p-ats">
+          <header class="panel-head"><h2>ATS simulation</h2><span class="audit-stamp" id="atsStamp"></span></header>
+          <p class="panel-note">How an Applicant Tracking System is likely to read this CV against the posting.</p>
+          <div class="gauge-row">
+            <div class="gauge" id="atsGauge"></div>
+            <div class="ats-bars" id="atsBars"></div>
+          </div>
+          <div class="kw-block">
+            <div>
+              <h3 class="micro">Missing keywords</h3>
+              <div class="kw-tags" id="atsMissing"></div>
+            </div>
+            <div>
+              <h3 class="micro">Likely ATS problems</h3>
+              <ul class="list" id="atsProblems"></ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel" id="p-recruiter">
+          <header class="panel-head"><h2>Recruiter simulation</h2><span class="badge" id="recBadge"></span></header>
+          <p class="panel-note">A simulated human recruiter's first read of your application.</p>
+          <div class="rec-top">
+            <div class="rec-meter"><span class="micro">Interview interest</span><div class="meter"><i id="recMeter"></i></div><b id="recChance">–</b></div>
+            <div class="rec-facts" id="recFacts"></div>
+          </div>
+          <div class="two-col">
+            <div><h3 class="micro">Strengths a recruiter sees</h3><ul class="list" id="recStrengths"></ul></div>
+            <div><h3 class="micro">Concerns &amp; weaknesses</h3><ul class="list gaps" id="recWeak"></ul></div>
+          </div>
+          <h3 class="micro">Questions this is likely to trigger</h3>
+          <ul class="list" id="recQuestions"></ul>
+        </article>
+
+        <article class="panel" id="p-risk">
+          <header class="panel-head"><h2>Resume health report</h2><span class="badge" id="riskBadge"></span></header>
+          <div class="gauge-row">
+            <div class="gauge sm" id="riskGauge"></div>
+            <div class="risk-findings" id="riskFindings"></div>
+          </div>
+          <h3 class="micro">Fix these first</h3>
+          <ul class="list" id="riskRecs"></ul>
+        </article>
+
+        <article class="panel" id="p-roadmap">
+          <header class="panel-head"><h2>Improvement roadmap</h2></header>
+          <div class="road-scores">
+            <div class="road-now"><span class="micro">Current ATS</span><b id="roadNow">–</b></div>
+            <div class="road-arrow" aria-hidden="true">&rarr;</div>
+            <div class="road-pot"><span class="micro">Potential ATS</span><b id="roadPot">–</b></div>
+            <div class="road-gain" id="roadGain"></div>
+          </div>
+          <h3 class="micro">Recommended improvements</h3>
+          <ul class="list checks" id="roadList"></ul>
+        </article>
+
+        <article class="panel" id="p-prob">
+          <header class="panel-head"><h2>Interview &amp; offer probability</h2><span class="audit-stamp" id="probConf"></span></header>
+          <div class="prob-row">
+            <div class="prob"><span class="micro">Interview chance</span><b id="probInterview">–</b></div>
+            <div class="prob"><span class="micro">Offer chance</span><b id="probOffer">–</b></div>
+          </div>
+          <p class="prob-note" id="probWhy"></p>
+          <p class="disclaimer small">These are AI estimates based only on the text you provided — not guarantees. Real outcomes depend on the live candidate pool, timing, and the interview itself.</p>
+        </article>
+
+        <article class="panel" id="p-delta" hidden>
+          <header class="panel-head"><h2>Progress since last version</h2></header>
+          <p class="panel-note">Your agent compared this run to the previous one.</p>
+          <div class="delta-grid" id="deltaGrid"></div>
+        </article>
+
+        <article class="panel" id="p-company">
+          <header class="panel-head"><h2>Company research</h2></header>
+          <p class="panel-note">Read from the posting — and used to set your cover-letter tone.</p>
+          <div class="company-grid" id="companyGrid"></div>
+        </article>
+
+        <article class="panel" id="p-cv">
+          <header class="panel-head"><h2>Tailored CV</h2>
+            <div class="panel-actions"><span class="audit-stamp" id="cvStamp"></span><button class="copy-btn" data-copy="cvOut">Copy</button></div>
+          </header>
+          <p class="panel-note">Reworded from your real experience to mirror this posting. Nothing invented.</p>
+          <div class="output" id="cvOut"></div>
+        </article>
+
+        <article class="panel" id="p-letter">
+          <header class="panel-head"><h2>Cover letter</h2>
+            <div class="panel-actions"><span class="audit-stamp" id="letterStamp"></span><button class="copy-btn" data-copy="letterOut">Copy</button></div>
+          </header>
+          <p class="panel-note" id="letterTone"></p>
+          <div class="output" id="letterOut"></div>
+        </article>
+
+        <article class="panel" id="p-prep">
+          <header class="panel-head"><h2>Interview prep</h2><button class="copy-btn" data-copy="prepOut">Copy</button></header>
+          <div class="output" id="prepOut"></div>
+        </article>
+
+        <article class="panel" id="p-notes">
+          <header class="panel-head"><h2>Your notes</h2></header>
+          <p class="panel-note">Recruiter names, dates, follow-ups — saved on this device.</p>
+          <textarea id="notesInput" rows="4" placeholder="e.g. Applied 25 June via referral from Ana. Follow up in a week."></textarea>
+        </article>
+
+        <article class="panel log-panel" id="p-log">
+          <header class="panel-head"><h2>Agent decision log</h2></header>
+          <p class="panel-note">Each change the agent made, why, how confident it was, and the effect it expected.</p>
+          <div class="decisions" id="decisions"></div>
+          <details class="raw-log"><summary>Raw run trace</summary><pre class="agent-log" id="agentLog"></pre></details>
+        </article>
+
+        <article class="panel why-panel" id="p-why">
+          <header class="panel-head"><h2>Why this needed an autonomous agent</h2></header>
+          <p>Tailor did not just write a CV. From one input it ran a full chain of decisions, graded
+            its own work, and rewrote what fell short — work a single chat prompt does not do on its own:</p>
+          <ul class="why-list">
+            <li>Read and structured the job posting and the company behind it.</li>
+            <li>Read and structured your CV, separating real skills from filler.</li>
+            <li>Compared the two semantically and scored ATS compatibility.</li>
+            <li>Simulated a human recruiter's read and predicted their concerns.</li>
+            <li>Diagnosed the resume's health and weak bullet points.</li>
+            <li>Tailored the CV, then audited and rewrote it against an 85/100 gate.</li>
+            <li>Adapted the cover letter to the company's tone.</li>
+            <li>Built interview prep and a personalized improvement roadmap.</li>
+            <li>Estimated interview and offer probability — and saved it all to keep improving.</li>
+          </ul>
+        </article>
+
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Tailor — a StaGove autonomous agent.</span>
+    <span class="foot-dim">Runs on your device with your own free Groq key. No server, no account, nothing stored elsewhere.</span>
+  </footer>
+
+  <!-- API key dialog -->
+  <div class="modal" id="keyModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
+      <h2 id="keyTitle">Settings</h2>
+      <p class="modal-lede">
+        Tailor runs on a model hosted on Groq's free tier, configured by whoever deployed this site —
+        you don't need to do anything to start. Choose the model below. Entering your own Groq key is
+        <strong>optional</strong>: do it only if you'd rather not share the site's usage limit. A personal
+        key stays in this browser and is sent only to Groq.
+      </p>
+      <details class="steps-wrap">
+        <summary>Optional — use my own free Groq key</summary>
+        <ol class="steps">
+          <li>Open <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> and sign in.</li>
+          <li>Create an API key and copy it (starts with <code>gsk_</code>).</li>
+          <li>Paste it below.</li>
+        </ol>
+        <label class="micro" for="keyInput">Personal Groq key</label>
+        <input id="keyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false" />
+      </details>
+      <div class="modal-row">
+        <label class="model-select"><span class="micro">Model</span>
+          <select id="modelSelect">
+            <option value="llama-3.3-70b-versatile">Llama 3.3 70B — best quality</option>
+            <option value="llama-3.1-8b-instant">Llama 3.1 8B — fastest</option>
+            <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout — long context</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="keyForget" class="text-btn" type="button">Forget key</button>
+        <div><button id="keyCancel" class="ghost-btn" type="button">Cancel</button>
+        <button id="keySave" class="primary-btn" type="button">Save key</button></div>
+      </div>
+      <p class="modal-foot" id="keyStatus"></p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
