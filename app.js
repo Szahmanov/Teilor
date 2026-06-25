@@ -5,11 +5,11 @@
 (() => {
   "use strict";
 
-  const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-  const PROXY_URL = "/api/groq"; // site's secret key (Netlify Function / Render). Used when no personal key is set.
+  const PROXY_URL = "/api/groq";
   const FALLBACK_MODEL = "llama-3.1-8b-instant";
   const GATE = 85, MAX_REVISIONS = 2;
-  const LS = { key:"tailor.groqKey", model:"tailor.model", apps:"tailor.apps" };
+  const LS = { apps:"tailor.apps" };
+  const getModel = () => "llama-3.3-70b-versatile";
 
   const STAGES = ["Created","CV tailored","Cover letter","Interview prep","Applied","Interview set","Offer"];
 
@@ -24,8 +24,6 @@
   function toast(m){const t=$("toast");t.textContent=m;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,2800);}
 
   /* ---------- state ---------- */
-  const getKey=()=>localStorage.getItem(LS.key)||"";
-  const getModel=()=>localStorage.getItem(LS.model)||"llama-3.3-70b-versatile";
   const loadApps=()=>{try{return JSON.parse(localStorage.getItem(LS.apps)||"[]")}catch{return[]}};
   const saveApps=(a)=>localStorage.setItem(LS.apps,JSON.stringify(a.slice(0,40)));
   const getApp=(id)=>loadApps().find(a=>a.id===id);
@@ -37,14 +35,11 @@
      GROQ CALL LAYER
      ===================================================================== */
   async function groq(messages,{json=false,model=getModel(),temperature=0.4,retry=true}={}){
-    const key=getKey();                  // optional personal key
-    const url=key?GROQ_URL:PROXY_URL;    // no personal key → use the site's secret key via the proxy
     const headers={"Content-Type":"application/json"};
-    if(key) headers.Authorization=`Bearer ${key}`;
     const body={model,messages,temperature,max_tokens:2200};
     if(json) body.response_format={type:"json_object"};
     let res;
-    try{ res=await fetch(url,{method:"POST",headers,body:JSON.stringify(body)}); }
+    try{ res=await fetch(PROXY_URL,{method:"POST",headers,body:JSON.stringify(body)}); }
     catch{ throw new Error("NETWORK"); }
     if(res.status===401) throw new Error("BAD_KEY");
     if(res.status===429){
@@ -241,7 +236,7 @@
       openWorkspace(id);
       toast(existing?"Application updated — see what improved.":"Application created.");
     }catch(e){
-      const info=explainError(e);toast(info.msg);log("\n✗ "+info.msg);if(info.openKey)openKey();
+      const info=explainError(e);toast(info.msg);log("\n✗ "+info.msg);
     }finally{btn.disabled=false;btn.textContent="Run my career agent";$("run").hidden=true;}
   }
 
@@ -467,25 +462,12 @@
   }
 
   /* =====================================================================
-     KEY MODAL + ERRORS
+     ERRORS
      ===================================================================== */
-  function openKey(){$("keyInput").value=getKey();$("modelSelect").value=getModel();$("keyStatus").textContent="";$("keyStatus").className="modal-foot";$("keyModal").hidden=false;$("keyInput").focus();}
-  function closeKey(){$("keyModal").hidden=true;}
-  function saveKey(){
-    const k=$("keyInput").value.trim();
-    if(k&&!k.startsWith("gsk_")){setKeyStatus("That doesn't look like a Groq key — it starts with gsk_",true);return;}
-    if(k)localStorage.setItem(LS.key,k);else localStorage.removeItem(LS.key);
-    localStorage.setItem(LS.model,$("modelSelect").value);refreshKeyDot();
-    setKeyStatus(k?"Saved on this device.":"Key removed.",false,true);setTimeout(closeKey,700);
-  }
-  function forgetKey(){localStorage.removeItem(LS.key);$("keyInput").value="";refreshKeyDot();setKeyStatus("Key removed.",false,true);}
-  const setKeyStatus=(m,err,ok)=>{const s=$("keyStatus");s.textContent=m;s.className="modal-foot"+(err?" err":ok?" ok":"");};
-  function refreshKeyDot(){$("keyDot").className="key-dot ok";}
   function explainError(e){
     const m=String(e.message||e);
-    if(m.includes("GROQ_API_KEY"))return{msg:"The site owner hasn't set GROQ_API_KEY on the host yet. Add it in Netlify/Render env vars."};
-    if(m==="BAD_KEY")return{msg:"Your personal Groq key was rejected. Open Settings and fix or remove it.",openKey:true};
-    if(m==="RATE_LIMIT")return{msg:"Groq's free limit is busy. Wait a minute and run again."};
+    if(m.includes("GROQ_API_KEY"))return{msg:"Server configuration error — GROQ_API_KEY is not set on the host."};
+    if(m==="RATE_LIMIT")return{msg:"Groq's free limit is busy right now. Wait a minute and run again."};
     if(m==="NETWORK")return{msg:"Couldn't reach the server. Check your connection."};
     return{msg:"Something went wrong: "+m};
   }
@@ -506,7 +488,7 @@ Skills: SQL, Excel, Python (pandas, matplotlib), basic statistics. Languages: Bu
   function updateCounts(){$("jobCount").textContent=$("jobInput").value.length;$("cvCount").textContent=$("cvInput").value.length;}
 
   document.addEventListener("DOMContentLoaded",()=>{
-    refreshKeyDot();renderDashboard();showView("dashboard");
+    renderDashboard();showView("dashboard");
     $("jobInput")&&$("jobInput").addEventListener("input",updateCounts);
     $("cvInput")&&$("cvInput").addEventListener("input",updateCounts);
     $("newAppBtn").addEventListener("click",()=>openEditor(null));
@@ -520,10 +502,6 @@ Skills: SQL, Excel, Python (pandas, matplotlib), basic statistics. Languages: Bu
     $("wsDelete").addEventListener("click",()=>{if(confirm("Delete this application permanently?")){saveApps(loadApps().filter(x=>x.id!==openId));openDashboard();toast("Application deleted.");}});
     $("rejectToggle").addEventListener("click",()=>{const a=getApp(openId);a.rejected=!a.rejected;a.updatedAt=Date.now();upsertApp(a);renderWorkspace(a);});
     $("notesInput").addEventListener("input",()=>{const a=getApp(openId);if(!a)return;a.notes=$("notesInput").value;upsertApp(a);});
-    $("keyBtn").addEventListener("click",openKey);$("keySave").addEventListener("click",saveKey);
-    $("keyCancel").addEventListener("click",closeKey);$("keyForget").addEventListener("click",forgetKey);
-    $("keyModal").addEventListener("click",e=>{if(e.target===$("keyModal"))closeKey();});
-    document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("keyModal").hidden)closeKey();});
     document.querySelectorAll(".copy-btn").forEach(b=>b.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(plainText(b.dataset.copy));toast("Copied.");}catch{toast("Copy failed — select manually.");}}));
   });
 
