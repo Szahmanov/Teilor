@@ -1,6 +1,6 @@
 /* Tailor service worker — caches the app shell so the agent installs like an app.
    AI calls always go to the network (Groq). */
-const CACHE = "tailor-v2";
+const CACHE = "tailor-v3";
 const SHELL = ["./","./index.html","./styles.css","./app.js","./manifest.webmanifest",
   "./icon-192.png","./icon-512.png","./apple-touch-icon.png","./favicon-48.png"];
 
