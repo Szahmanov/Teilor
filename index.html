@@ -28,6 +28,7 @@
       <span class="wordmark">Tailor<em>Career Application Manager · StaGove</em></span>
     </button>
     <div class="topbar-actions">
+      <button id="remindBtn" class="ghost-btn" title="Get a reminder when it's time to follow up">🔔 Reminders</button>
       <button id="installBtn" class="ghost-btn" hidden>Install</button>
 
     </div>
@@ -47,7 +48,11 @@
         <button class="primary-btn big" id="newAppBtn">+ New application</button>
       </div>
 
+      <div class="follow-banner" id="followBanner" hidden></div>
+
       <div class="dash-stats" id="dashStats" hidden></div>
+
+      <div class="memory-card" id="memoryCard" hidden></div>
 
       <div class="app-grid" id="appGrid"></div>
 
@@ -116,6 +121,38 @@
         <span id="rejectToggle" class="reject-toggle">Mark as rejected</span>
         <span class="updated" id="wsUpdated"></span>
       </div>
+
+      <!-- lifecycle: next best action + status actions -->
+      <div class="lifecycle" id="lifecycle"></div>
+
+      <!-- 7-day follow-up prompt (in-workspace) -->
+      <div class="outcome-prompt" id="outcomePrompt" hidden></div>
+
+      <!-- mode panels (populated on demand) -->
+      <article class="panel mode-panel" id="p-followup" hidden>
+        <header class="panel-head"><h2>Follow-up email</h2>
+          <div class="panel-actions"><span class="audit-stamp" id="followStamp"></span><button class="copy-btn" data-copy="followOut">Copy</button></div>
+        </header>
+        <div class="why-box" id="followWhy"></div>
+        <div class="output" id="followOut"></div>
+      </article>
+
+      <article class="panel mode-panel" id="p-interview" hidden>
+        <header class="panel-head"><h2>Interview mode</h2><span class="badge" id="ivConfidence"></span></header>
+        <p class="panel-note">Full preparation built from your stored CV and this job — nothing to re-upload.</p>
+        <div class="output" id="interviewOut"></div>
+      </article>
+
+      <article class="panel mode-panel" id="p-rejection" hidden>
+        <header class="panel-head"><h2>Rejection learning</h2></header>
+        <div class="output" id="rejectionOut"></div>
+      </article>
+
+      <article class="panel mode-panel offer-panel" id="p-offer" hidden>
+        <header class="panel-head"><h2 id="offerTitle">🎉 Offer received</h2></header>
+        <div class="output" id="offerOut"></div>
+        <button class="primary-btn" id="saveBestBtn">Save as my best CV version</button>
+      </article>
 
       <!-- score strip -->
       <div class="score-strip" id="scoreStrip"></div>
@@ -230,6 +267,12 @@
           <div class="output" id="prepOut"></div>
         </article>
 
+        <article class="panel" id="p-timeline">
+          <header class="panel-head"><h2>Application timeline</h2></header>
+          <p class="panel-note">Every step, dated, with the agent's recommendation at that point.</p>
+          <ol class="timeline" id="timeline"></ol>
+        </article>
+
         <article class="panel" id="p-notes">
           <header class="panel-head"><h2>Your notes</h2></header>
           <p class="panel-note">Recruiter names, dates, follow-ups — saved on this device.</p>
@@ -265,8 +308,8 @@
   </main>
 
   <footer class="foot">
-    <span>Tailor — a StaGove autonomous agent.</span>
-    <span class="foot-dim">Runs on your device with your own free Groq key. No server, no account, nothing stored elsewhere.</span>
+    <span>Tailor — from your first application to your final job offer.</span>
+    <span class="foot-dim">A StaGove autonomous agent. Runs on your device — no account, nothing stored elsewhere.</span>
   </footer>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
