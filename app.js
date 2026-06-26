@@ -8,10 +8,32 @@
   const PROXY_URL = "/api/groq";
   const FALLBACK_MODEL = "llama-3.1-8b-instant";
   const GATE = 85, MAX_REVISIONS = 2;
-  const LS = { apps:"tailor.apps" };
+  const LS = { apps:"tailor.apps", memory:"tailor.memory" };
   const getModel = () => "llama-3.3-70b-versatile";
 
   const STAGES = ["Created","CV tailored","Cover letter","Interview prep","Applied","Interview set","Offer"];
+  const DAY = 86400000;
+  const FOLLOWUP_DAYS = 7;
+  const daysSince = (ts) => ts ? Math.floor((Date.now()-ts)/DAY) : 0;
+
+  /* career memory (global, across all applications) */
+  const loadMemory=()=>{try{return JSON.parse(localStorage.getItem(LS.memory)||"{}")}catch{return{}}};
+  const saveMemory=(m)=>localStorage.setItem(LS.memory,JSON.stringify(m));
+  function rememberWeaknesses(terms){
+    const m=loadMemory();m.weaknesses=m.weaknesses||{};
+    (terms||[]).forEach(t=>{const k=String(t).trim().toLowerCase().slice(0,40);if(k.length>2)m.weaknesses[k]=(m.weaknesses[k]||0)+1;});
+    saveMemory(m);
+  }
+  const topWeaknesses=(n=5)=>{const w=loadMemory().weaknesses||{};return Object.entries(w).sort((a,b)=>b[1]-a[1]).slice(0,n);};
+
+  /* normalise older saved apps so new fields always exist */
+  function normalize(a){
+    if(!a) return a;
+    if(!a.status) a.status = a.rejected?"rejected":(a.stageIndex>=6?"offer":(a.stageIndex>=4?"applied":"ready"));
+    if(!a.timeline) a.timeline = [{event:"Resume optimized & documents generated",ts:a.createdAt||a.updatedAt||Date.now(),rec:"Apply when ready"}];
+    if(a.appliedAt===undefined) a.appliedAt = a.status!=="ready"?(a.updatedAt||null):null;
+    return a;
+  }
 
   /* ---------- helpers ---------- */
   const $ = (id) => document.getElementById(id);
@@ -77,7 +99,8 @@
   const stepState=(id,st,note)=>{const li=$("step-"+id);if(!li)return;li.className=st;if(st==="done")li.querySelector(".ico").innerHTML="&#10003;";if(note)li.querySelector(".note").textContent=note;};
   const safe=async(fn,fb={})=>{try{return await fn()}catch(e){if(["NO_KEY","BAD_KEY","RATE_LIMIT","NETWORK"].includes(e.message))throw e;log("  · step error: "+e.message);return fb;}};
 
-  async function runAgent(job,cv){
+  async function runAgent(job,cv,memoryWeak){
+    const memHint = (memoryWeak&&memoryWeak.length) ? `\n\nKNOWN RECURRING WEAK AREAS from this candidate's past applications — proactively strengthen these wherever the real CV allows (never fabricate): ${memoryWeak.join(", ")}.` : "";
     logLines=[];log("StaGove · Tailor — run @ "+new Date().toLocaleString());log("model: "+getModel());
     renderPipeline();$("run").hidden=false;
 
@@ -130,7 +153,7 @@
       kind:"tailored CV",
       draft:()=>groqJSON([
         {role:"system",content:"You tailor a candidate's REAL experience to a posting. Never invent experience, skills, employers, numbers or qualifications not in their CV. Only reword and reframe what exists so it mirrors the posting and surfaces ATS keywords. JSON only."},
-        {role:"user",content:`Return JSON: summary (2-3 sentence professional summary tuned to this role, true to the candidate), bullets (array 5-7 achievement bullets rewritten from real experience, weaving in posting keywords naturally, quantified only where the candidate gave numbers), keywords_used (array), decisions (array of {decision, reason, confidence (0-100), expected_effect} — the key tailoring choices you made).\n\nPOSTING:\n${JSON.stringify(jobco)}\n\nCANDIDATE (only use what is here):\n${JSON.stringify(cvData)}`}
+        {role:"user",content:`Return JSON: summary (2-3 sentence professional summary tuned to this role, true to the candidate), bullets (array 5-7 achievement bullets rewritten from real experience, weaving in posting keywords naturally, quantified only where the candidate gave numbers), keywords_used (array), decisions (array of {decision, reason, confidence (0-100), expected_effect} — the key tailoring choices you made).\n\nPOSTING:\n${JSON.stringify(jobco)}\n\nCANDIDATE (only use what is here):\n${JSON.stringify(cvData)}${memHint}`}
       ]),
       audit:(d)=>groqJSON([
         {role:"system",content:"Strict reviewer of tailored CVs. JSON only."},
@@ -214,25 +237,38 @@
     if(cv.length<60){toast("Paste your CV or fuller experience.");$("cvInput").focus();return;}
     const btn=$("runBtn");btn.disabled=true;btn.textContent="Working…";
     try{
-      const analysis=await runAgent(job,cv);
+      const memWeak=topWeaknesses(5).map(([t])=>t);
+      const analysis=await runAgent(job,cv,memWeak);
       // build / update the project
-      const existing=editingId?getApp(editingId):null;
+      const existing=editingId?normalize(getApp(editingId)):null;
       const id=existing?existing.id:"app_"+analysis.ts;
       const snapshot={ts:analysis.ts,ats:clamp(analysis.ats?.ats_score),keyword:clamp(analysis.ats?.keyword_coverage),interview:clamp(analysis.review?.recruiter?.interview_chance),readiness:readiness(analysis)};
+      const timeline=existing?.timeline?[...existing.timeline]:[];
+      timeline.push({event:existing?"Resume re-optimized (new version)":"Resume optimized & documents generated",ts:analysis.ts,rec:"Review the documents, then mark as applied when you send it"});
       const app={
         id,
         title:analysis.jobco?.role_title||existing?.title||"Untitled role",
         company:analysis.jobco?.company_name||existing?.company||"the company",
         job,cv,
-        stageIndex:Math.max(existing?.stageIndex||0,3), // auto-advance to "Interview prep"
+        stageIndex:Math.max(existing?.stageIndex||0,3),
         rejected:existing?.rejected||false,
+        status:existing?.status&&existing.status!=="ready"?existing.status:"ready",
+        appliedAt:existing?.appliedAt||null,
+        outcome:existing?.outcome||null,
         notes:existing?.notes||"",
         analysis,
         history:[...(existing?.history||[]),snapshot],
+        timeline,
+        interview:existing?.interview||null,
+        rejection:existing?.rejection||null,
+        followup:existing?.followup||null,
         createdAt:existing?.createdAt||analysis.ts,
         updatedAt:analysis.ts,
       };
       upsertApp(app);
+      // career memory: record this run's weak areas for the future
+      const weakTerms=[...(analysis.review?.recruiter?.weaknesses||[]),...(analysis.ats?.missing_keywords||[])];
+      rememberWeaknesses(weakTerms);
       openWorkspace(id);
       toast(existing?"Application updated — see what improved.":"Application created.");
     }catch(e){
@@ -258,17 +294,22 @@
 
   /* ---- dashboard ---- */
   function renderDashboard(){
-    const apps=loadApps();
+    const apps=loadApps().map(normalize);
     $("emptyState").classList.toggle("show",apps.length===0);
+    renderFollowBanner();
+    renderMemory();
     const grid=$("appGrid");grid.innerHTML="";
-    // stats
+    // success metrics
     const stats=$("dashStats");
     if(apps.length){
       stats.hidden=false;stats.innerHTML="";
-      const offers=apps.filter(a=>a.stageIndex>=6&&!a.rejected).length;
-      const active=apps.filter(a=>!a.rejected&&a.stageIndex<6).length;
-      const avg=apps.length?Math.round(apps.reduce((p,a)=>p+readiness(a.analysis||{}),0)/apps.length):0;
-      [["Applications",apps.length],["Active",active],["Offers",offers],["Avg. readiness",avg+"%"]].forEach(([l,v])=>{
+      const sent=apps.filter(a=>a.status!=="ready").length;
+      const interviews=apps.filter(a=>a.status==="interview"||a.status==="offer"||(a.stageIndex>=5&&!a.rejected)).length;
+      const offers=apps.filter(a=>a.status==="offer").length;
+      const avgA=avg(apps.map(a=>a.analysis?.ats?.ats_score));
+      const avgR=avg(apps.map(a=>a.analysis?.review?.recruiter?.interview_chance));
+      const avgH=avg(apps.map(a=>a.analysis?.risk?.risk_score!=null?100-a.analysis.risk.risk_score:null));
+      [["Created",apps.length],["Applied",sent],["Interviews",interviews],["Offers",offers],["Avg ATS",avgA+"%"],["Avg recruiter",avgR+"%"],["Avg health",avgH+"%"]].forEach(([l,v])=>{
         const s=el("div","dash-stat");s.innerHTML=`<b>${v}</b><span>${l}</span>`;stats.append(s);
       });
     }else stats.hidden=true;
@@ -277,27 +318,34 @@
       const an=a.analysis||{};
       const card=el("button","app-card");
       const ats=clamp(an.ats?.ats_score),rec=clamp(an.review?.recruiter?.interview_chance),rd=readiness(an);
-      const stage=a.rejected?"Rejected":STAGES[Math.min(a.stageIndex||0,6)];
-      const pillCls=a.rejected?"rejected":(a.stageIndex>=6?"offer":"");
+      const statusLabel={ready:"Ready to apply",applied:`Waiting · ${daysSince(a.appliedAt)}d`,interview:"Interview",offer:"Offer",rejected:"Rejected"}[a.status]||"Ready";
+      const pillCls=a.status==="offer"?"offer":a.status==="rejected"?"rejected":a.status==="interview"?"interview":a.status==="applied"?"applied":"";
+      const n=nba(a);
       card.innerHTML=
         `<div class="ac-top"><div><p class="ac-role">${esc(a.title)}</p><p class="ac-co">${esc(a.company)}</p></div>`+
-        `<span class="stage-pill ${pillCls}">${esc(stage)}</span></div>`+
+        `<span class="stage-pill ${pillCls}">${esc(statusLabel)}</span></div>`+
         `<div class="ac-scores"><span class="mini">ATS <b>${ats}%</b></span><span class="mini">Recruiter <b>${rec}%</b></span><span class="mini">Ready <b>${rd}%</b></span></div>`+
         `<div class="ac-bar"><i style="width:${rd}%"></i></div>`+
+        `<div class="ac-nba">→ ${esc(n.text)}</div>`+
         `<div class="ac-foot"><span>${a.history?.length||1} version${(a.history?.length||1)>1?"s":""}</span><span>${new Date(a.updatedAt).toLocaleDateString()}</span></div>`;
       card.addEventListener("click",()=>openWorkspace(a.id));
       grid.append(card);
     });
   }
+  const avg=(arr)=>{const v=arr.filter(x=>x!=null).map(Number);return v.length?Math.round(v.reduce((p,c)=>p+c,0)/v.length):0;};
 
   /* ---- workspace ---- */
-  function openWorkspace(id){openId=id;renderWorkspace(getApp(id));showView("workspace");}
+  function openWorkspace(id){openId=id;renderWorkspace(normalize(getApp(id)));showView("workspace");}
   function renderWorkspace(a){
     if(!a){openDashboard();return;}
     const an=a.analysis||{};
     $("wsRole").textContent=a.title;$("wsCompany").textContent=a.company;
     $("wsUpdated").textContent="Updated "+new Date(a.updatedAt).toLocaleString();
     renderTracker(a);
+    renderLifecycle(a);
+    renderOutcomePrompt(a);
+    renderModePanels(a);
+    renderTimeline(a);
 
     // score strip
     const strip=$("scoreStrip");strip.innerHTML="";
@@ -312,7 +360,7 @@
 
     // jump nav
     const nav=$("wsNav");nav.innerHTML="";
-    [["p-ats","ATS"],["p-recruiter","Recruiter"],["p-risk","Health"],["p-roadmap","Roadmap"],["p-prob","Odds"],["p-cv","CV"],["p-letter","Letter"],["p-prep","Prep"],["p-log","Log"]].forEach(([id,l])=>{const x=el("a",null,l);x.href="#"+id;nav.append(x);});
+    [["p-ats","ATS"],["p-recruiter","Recruiter"],["p-risk","Health"],["p-roadmap","Roadmap"],["p-prob","Odds"],["p-cv","CV"],["p-letter","Letter"],["p-prep","Prep"],["p-timeline","Timeline"],["p-log","Log"]].forEach(([id,l])=>{const x=el("a",null,l);x.href="#"+id;nav.append(x);});
 
     renderTasks(an);
     renderATS(an.ats||{});
@@ -335,7 +383,12 @@
     STAGES.forEach((s,i)=>{
       const step=el("button","step"+(i<a.stageIndex?" done":i===a.stageIndex?" current":""));
       step.innerHTML=`<div class="dot"></div><span class="lbl">${esc(s)}</span>`;
-      step.addEventListener("click",()=>{const app=getApp(openId);app.stageIndex=i;app.rejected=false;app.updatedAt=Date.now();upsertApp(app);renderWorkspace(app);});
+      step.addEventListener("click",()=>{
+        const app=normalize(getApp(openId));app.stageIndex=i;app.rejected=false;
+        app.status = i>=6?"offer":i>=5?"interview":i>=4?"applied":"ready";
+        if(app.status==="applied"&&!app.appliedAt) app.appliedAt=Date.now();
+        app.updatedAt=Date.now();upsertApp(app);renderWorkspace(app);
+      });
       t.append(step);
     });
     const rt=$("rejectToggle");
@@ -346,11 +399,12 @@
   function renderTasks(an){
     const d=an.done||{};
     const rows=[
-      ["Extracted job requirements",d.job],["Researched the company",d.company],["Structured your CV",d.cv],
+      ["Read the job posting",d.job],["Researched the company",d.company],["Structured your CV",d.cv],
       ["Evaluated ATS compatibility",d.ats],["Simulated a recruiter review",d.recruiter],["Diagnosed resume health",d.risk],
       ["Tailored your CV",d.cv_tailored],["Audited & rewrote weak sections",d.cv_revised??d.cv_tailored],
       ["Generated a tone-matched cover letter",d.letter],["Built interview preparation",d.prep],
       ["Estimated interview & offer probability",d.probability],["Created an improvement roadmap",d.roadmap],
+      ["Created the application project",true],["Planned the 7-day follow-up",true],["Generated your next recommended action",true],
     ];
     const ul=$("taskList");ul.innerHTML="";
     rows.forEach(([l,ok])=>{const li=el("li",ok?"":"skip",esc(l));ul.append(li);});
@@ -455,15 +509,252 @@
 
   /* plain-text export */
   function plainText(id){
-    const a=getApp(openId)?.analysis||{};
+    const a=getApp(openId)?.analysis||{}; const app=getApp(openId)||{};
     if(id==="cvOut"){const cv=a.cv?.data||{};let t="TAILORED CV\n\n";if(cv.summary)t+=cv.summary+"\n\n";if(cv.bullets)t+=cv.bullets.map(b=>"• "+b).join("\n");return t;}
     if(id==="letterOut")return a.letter?.text||"";
+    if(id==="followOut")return (app.followup?.subject?("Subject: "+app.followup.subject+"\n\n"):"")+(app.followup?.email||"");
     return $(id).innerText.trim();
   }
 
   /* =====================================================================
-     ERRORS
+     LIFECYCLE — Next Best Action, Mark Applied, outcomes, AI modes
      ===================================================================== */
+
+  // local, no API call — Tailor always knows what to do next
+  function nba(a){
+    const an=a.analysis||{}; const rd=readiness(an);
+    const days=daysSince(a.appliedAt); const left=Math.max(0,FOLLOWUP_DAYS-days);
+    if(a.status==="offer") return {text:"You got the offer 🎉",sub:"Save this CV as your best version so future applications learn from it.",action:null};
+    if(a.status==="rejected") return {text:"Turn this into your next win",sub:"Apply the rejection lessons, then improve and re-run for a stronger application.",action:"improve",label:"Improve & re-run"};
+    if(a.status==="interview") return {text:"Prepare for your interview",sub:"Open interview mode — questions, STAR answers and company prep, built from your stored CV.",action:"interview",label:"Open interview mode"};
+    if(a.status==="applied"){
+      if(days>=FOLLOWUP_DAYS) return {text:"Follow up today",sub:`It's been ${days} days with no reply logged. A short, professional nudge is the right move now.`,action:"followup",label:"Generate follow-up email"};
+      return {text:`Wait ${left} more day${left===1?"":"s"}`,sub:`You applied ${days} day${days===1?"":"s"} ago. Following up before day ${FOLLOWUP_DAYS} can read as impatient. Tailor will prompt you when it's time.`,action:null};
+    }
+    // ready / not yet applied
+    if(rd<65) return {text:"Strengthen your CV before applying",sub:`Readiness is ${rd}%. Fix the top roadmap items and re-run — then apply from a stronger position.`,action:"improve",label:"Improve & re-run"};
+    return {text:"Apply now",sub:"Your application is strong. Send it, then mark it applied so Tailor can track and remind you.",action:"markApplied",label:"Mark as applied"};
+  }
+
+  function renderLifecycle(a){
+    const box=$("lifecycle"); const n=nba(a);
+    const statusLabel={ready:"Ready to apply",applied:"Applied · waiting",interview:"Interview",offer:"Offer",rejected:"Rejected"}[a.status]||"Ready";
+    box.innerHTML="";
+    const left=el("div","nba");
+    left.innerHTML=`<span class="micro">Next best action</span><div class="nba-text">${esc(n.text)}</div><div class="nba-sub">${esc(n.sub)}</div>`;
+    const right=el("div","lc-actions");
+    right.append(el("span","status-pill "+a.status,statusLabel));
+    if(n.action){
+      const b=el("button","chip-btn pine",esc(n.label));
+      b.addEventListener("click",()=>doAction(n.action));
+      right.append(b);
+    }
+    box.append(left,right);
+  }
+
+  function doAction(action){
+    const a=normalize(getApp(openId));
+    if(action==="improve"){openEditor(openId);return;}
+    if(action==="markApplied"){markApplied(a);return;}
+    if(action==="followup"){generateFollowup(a);return;}
+    if(action==="interview"){generateInterview(a);return;}
+  }
+
+  function pushTimeline(a,event,rec){a.timeline=a.timeline||[];a.timeline.push({event,ts:Date.now(),rec:rec||""});}
+
+  function markApplied(a){
+    a.status="applied";a.appliedAt=Date.now();a.stageIndex=Math.max(a.stageIndex||0,4);a.updatedAt=Date.now();
+    pushTimeline(a,"Application sent","Tailor will check back in 7 days");
+    upsertApp(a);ensureReminderPermission(true);renderWorkspace(a);
+    toast("Marked as applied. Tailor will remind you to follow up in 7 days.");
+  }
+
+  // the response prompt — proactive after 7 days, but always available once applied
+  function renderOutcomePrompt(a){
+    const box=$("outcomePrompt");
+    if(a.status!=="applied"){box.hidden=true;return;}
+    box.hidden=false;
+    const d=daysSince(a.appliedAt);
+    const lead = d>=FOLLOWUP_DAYS
+      ? `<b>It's been ${d} days since you applied to ${esc(a.company)}.</b> Did you hear back?`
+      : `Applied ${d} day${d===1?"":"s"} ago to ${esc(a.company)}. Heard back already? Log it and Tailor adapts:`;
+    box.innerHTML=`<p>${lead}</p>`;
+    const row=el("div","fb-row");
+    [["Interview","interview","chip-btn pine"],["Offer","offer","chip-btn pine"],["Rejected","rejected","chip-btn bad"],["No reply yet","noreply","chip-btn"]].forEach(([lbl,out,cls])=>{
+      const b=el("button",cls,lbl);b.addEventListener("click",()=>setOutcome(a.id,out));row.append(b);
+    });
+    box.append(row);
+  }
+
+  async function setOutcome(id,out){
+    const a=normalize(getApp(id));
+    if(out==="interview"){a.status="interview";a.stageIndex=Math.max(a.stageIndex,5);pushTimeline(a,"Interview stage reached","Prepare with interview mode");a.updatedAt=Date.now();upsertApp(a);renderWorkspace(a);generateInterview(a);return;}
+    if(out==="offer"){a.status="offer";a.stageIndex=6;a.rejected=false;pushTimeline(a,"Offer received 🎉","Save as best CV version");a.updatedAt=Date.now();upsertApp(a);renderWorkspace(a);toast("Congratulations! 🎉");return;}
+    if(out==="rejected"){
+      a.status="rejected";a.rejected=true;pushTimeline(a,"Application rejected","Learn from it and improve");a.updatedAt=Date.now();upsertApp(a);
+      const fb=prompt("Did the company give any feedback? Paste it here (or leave blank — Tailor will infer the likely reasons):")||"";
+      renderWorkspace(a);generateRejection(a,fb);return;
+    }
+    if(out==="noreply"){
+      a.appliedAt=Date.now(); // reset the 7-day clock
+      pushTimeline(a,"Still waiting — follow-up prepared","Send the follow-up, then wait again");a.updatedAt=Date.now();upsertApp(a);
+      renderWorkspace(a);generateFollowup(a);return;
+    }
+  }
+
+  /* ---- AI modes (one Groq call each, on demand) ---- */
+  async function withBusy(fn,msg){toast(msg);try{await fn();}catch(e){const i=explainError(e);toast(i.msg);}}
+
+  async function generateFollowup(a){
+    await withBusy(async()=>{
+      const an=a.analysis||{};
+      const r=await groqJSON([
+        {role:"system",content:"You write short, professional follow-up emails after a job application. JSON only."},
+        {role:"user",content:`The candidate applied ${daysSince(a.appliedAt)||7} days ago and has had no reply. Write a brief, polite, confident follow-up. Return JSON: subject (string), email (string, 90-130 words, signed with the candidate's name if known), why (one sentence on why a follow-up helps), timing (one sentence on why now is right), expected (one sentence on the likely outcome).\n\nROLE: ${a.title} at ${a.company}\nCANDIDATE:\n${JSON.stringify(an.cvData||{})}\nORIGINAL COVER LETTER:\n${an.letter?.text||""}`}
+      ]);
+      a.followup={subject:r.subject||"",email:r.email||"",why:r.why||"",timing:r.timing||"",expected:r.expected||""};
+      a.updatedAt=Date.now();upsertApp(a);renderModePanels(a);
+      $("p-followup").scrollIntoView({behavior:"smooth",block:"start"});
+    },"Writing your follow-up email…");
+  }
+
+  async function generateInterview(a){
+    await withBusy(async()=>{
+      const an=a.analysis||{};
+      const r=await groqJSON([
+        {role:"system",content:"You are an interview coach. Build full interview prep from a stored CV and job. JSON only."},
+        {role:"user",content:`Return JSON: technical (array of {q, answer} — role-specific technical questions with answers grounded in the candidate's real CV), behavioral (array of {q, answer} — behavioural questions with full STAR answers from real experience), ask_them (array of 4 strings to ask the interviewer), weak_areas (array of strings the candidate should review before the interview), company_prep (array of strings — company-specific preparation points), confidence (0-100 estimated readiness).\n\nROLE: ${a.title} at ${a.company}\nPOSTING:\n${JSON.stringify(an.jobco||{})}\nCANDIDATE:\n${JSON.stringify(an.cvData||{})}\nKNOWN GAPS:\n${JSON.stringify(an.review?.recruiter?.weaknesses||[])}`}
+      ]);
+      a.interview=r;a.status=a.status==="rejected"?a.status:"interview";a.stageIndex=Math.max(a.stageIndex,5);
+      pushTimeline(a,"Interview prep generated","Review weak areas, rehearse STAR answers");
+      a.updatedAt=Date.now();upsertApp(a);renderWorkspace(a);
+      $("p-interview").scrollIntoView({behavior:"smooth",block:"start"});
+    },"Building your interview mode…");
+  }
+
+  async function generateRejection(a,feedback){
+    await withBusy(async()=>{
+      const an=a.analysis||{};
+      const r=await groqJSON([
+        {role:"system",content:"You analyse a job rejection to make the next application stronger. JSON only."},
+        {role:"user",content:`Return JSON: reasons (array of likely reasons this application was rejected), changes (array of concrete changes for next time), roadmap (array of skill/keyword areas to build), confidence ("High"/"Medium"/"Low" in this analysis).\n\nROLE: ${a.title} at ${a.company}\nKNOWN GAPS:\n${JSON.stringify(an.review?.recruiter?.weaknesses||[])}\nMISSING KEYWORDS:\n${JSON.stringify(an.ats?.missing_keywords||[])}\nCOMPANY FEEDBACK (may be blank):\n${feedback||"(none provided)"}`}
+      ]);
+      a.rejection=r;a.updatedAt=Date.now();upsertApp(a);
+      rememberWeaknesses([...(r.roadmap||[]),...(r.changes||[])]); // feed Career Memory
+      renderWorkspace(a);
+      $("p-rejection").scrollIntoView({behavior:"smooth",block:"start"});
+    },"Analysing the rejection to improve your next application…");
+  }
+
+  /* ---- render mode panels ---- */
+  function renderModePanels(a){
+    // follow-up
+    const fp=$("p-followup");
+    if(a.followup&&a.followup.email){
+      fp.hidden=false;
+      $("followStamp").textContent=a.followup.subject?("Subject: "+a.followup.subject):"";
+      $("followWhy").innerHTML=`<b>Why now:</b> ${esc(a.followup.timing||"")} <b>Why it helps:</b> ${esc(a.followup.why||"")} <b>Expected:</b> ${esc(a.followup.expected||"")}`;
+      $("followOut").innerHTML=`<p>${esc(a.followup.email)}</p>`;
+    } else fp.hidden=true;
+
+    // interview
+    const ip=$("p-interview");
+    if(a.interview){
+      ip.hidden=false;const iv=a.interview;
+      $("ivConfidence").textContent="Confidence: "+clamp(iv.confidence)+"%";
+      let h="";
+      if(iv.technical?.length){h+=`<h4>Technical questions</h4>`;iv.technical.forEach(q=>h+=`<div class="qa"><span class="q">${esc(q.q)}</span><p>${esc(q.answer)}</p></div>`);}
+      if(iv.behavioral?.length){h+=`<h4>Behavioural questions (STAR)</h4>`;iv.behavioral.forEach(q=>h+=`<div class="qa"><span class="q">${esc(q.q)}</span><p>${esc(q.answer)}</p></div>`);}
+      if(iv.weak_areas?.length)h+=`<h4>Review before you go</h4><ul>${iv.weak_areas.map(x=>`<li>${esc(strOf(x))}</li>`).join("")}</ul>`;
+      if(iv.company_prep?.length)h+=`<h4>Company-specific prep</h4><ul>${iv.company_prep.map(x=>`<li>${esc(strOf(x))}</li>`).join("")}</ul>`;
+      if(iv.ask_them?.length)h+=`<h4>Questions to ask them</h4><ul>${iv.ask_them.map(x=>`<li>${esc(strOf(x))}</li>`).join("")}</ul>`;
+      $("interviewOut").innerHTML=h||"<p>No output.</p>";
+    } else ip.hidden=true;
+
+    // rejection
+    const rp=$("p-rejection");
+    if(a.rejection){
+      rp.hidden=false;const rj=a.rejection;let h="";
+      if(rj.reasons?.length)h+=`<h4>Why it was likely rejected</h4><ul>${rj.reasons.map(x=>`<li>${esc(strOf(x))}</li>`).join("")}</ul>`;
+      if(rj.changes?.length)h+=`<h4>What to change next time</h4><ul>${rj.changes.map(x=>`<li>${esc(strOf(x))}</li>`).join("")}</ul>`;
+      if(rj.roadmap?.length)h+=`<h4>Added to your career roadmap</h4><p>${rj.roadmap.map(x=>esc(strOf(x))).join(" · ")}</p>`;
+      $("rejectionOut").innerHTML=h||"<p>No output.</p>";
+    } else rp.hidden=true;
+
+    // offer
+    const op=$("p-offer");
+    if(a.status==="offer"){
+      op.hidden=false;const an=a.analysis||{};
+      const dur=Math.max(1,Math.round(((a.updatedAt||Date.now())-(a.createdAt||a.updatedAt))/DAY));
+      $("offerOut").innerHTML=
+        `<p>Application successful. Here's how this one went:</p>`+
+        `<div class="offer-metrics">`+
+        `<div class="om"><b>${clamp(an.ats?.ats_score)}%</b><span>ATS score</span></div>`+
+        `<div class="om"><b>${clamp(an.review?.recruiter?.interview_chance)}%</b><span>Recruiter</span></div>`+
+        `<div class="om"><b>${readiness(an)}%</b><span>Readiness</span></div>`+
+        `<div class="om"><b>${a.history?.length||1}</b><span>Versions</span></div>`+
+        `<div class="om"><b>${dur}d</b><span>Duration</span></div>`+
+        `</div>`;
+    } else op.hidden=true;
+  }
+  const strOf=(x)=>typeof x==="string"?x:(x.q||x.text||x.point||JSON.stringify(x));
+
+  function renderTimeline(a){
+    const ol=$("timeline");ol.innerHTML="";
+    (a.timeline||[]).forEach(t=>{
+      const li=el("li");
+      li.innerHTML=`<div class="tl-top"><span class="tl-event">${esc(t.event)}</span><span class="tl-date">${new Date(t.ts).toLocaleDateString()}</span></div>${t.rec?`<div class="tl-rec">→ ${esc(t.rec)}</div>`:""}`;
+      ol.append(li);
+    });
+    // show the next expected step as a future node
+    const next={ready:"Apply",applied:"Hear back",interview:"Interview & decision",rejected:"Improve & reapply",offer:"Accept the offer"}[a.status];
+    if(next&&a.status!=="offer"){const li=el("li","future");li.innerHTML=`<div class="tl-top"><span class="tl-event" style="color:var(--muted)">${esc(next)}</span><span class="tl-date">upcoming</span></div>`;ol.append(li);}
+  }
+
+  /* ---- reminders (local notifications) ---- */
+  function ensureReminderPermission(silent){
+    if(!("Notification" in window)) {if(!silent)toast("This browser doesn't support notifications.");return;}
+    if(Notification.permission==="granted"){if(!silent)toast("Reminders are on.");checkReminders();return;}
+    if(Notification.permission!=="denied") Notification.requestPermission().then(p=>{if(p==="granted"){if(!silent)toast("Reminders on — Tailor will nudge you when it's time to follow up.");checkReminders();}else if(!silent)toast("Reminders blocked in browser settings.");});
+    else if(!silent) toast("Reminders are blocked in your browser settings.");
+  }
+  function checkReminders(){
+    if(!("Notification" in window)||Notification.permission!=="granted")return;
+    const due=loadApps().map(normalize).filter(a=>a.status==="applied"&&daysSince(a.appliedAt)>=FOLLOWUP_DAYS);
+    if(due.length){
+      try{new Notification("Tailor — time to follow up",{body:`${due.length} application${due.length>1?"s":""} waiting ${FOLLOWUP_DAYS}+ days. Open Tailor to send a follow-up.`,icon:"icon-192.png"});}catch{}
+    }
+  }
+
+  /* ---- dashboard: follow-up banner + career memory ---- */
+  function renderFollowBanner(){
+    const due=loadApps().map(normalize).filter(a=>a.status==="applied"&&daysSince(a.appliedAt)>=FOLLOWUP_DAYS);
+    const b=$("followBanner");
+    if(!due.length){b.hidden=true;return;}
+    b.hidden=false;
+    b.innerHTML=`<h3>Time to follow up</h3><p>These applications have been waiting ${FOLLOWUP_DAYS}+ days with no reply logged. Did you hear back?</p>`;
+    due.forEach(a=>{
+      const item=el("div","fb-item");
+      item.innerHTML=`<div style="margin-bottom:.4rem"><b>${esc(a.title)}</b> — ${esc(a.company)} <span class="tl-date">· ${daysSince(a.appliedAt)} days</span></div>`;
+      const row=el("div","fb-row");
+      [["Interview","interview","chip-btn pine"],["Offer","offer","chip-btn pine"],["Rejected","rejected","chip-btn bad"],["No reply","noreply","chip-btn"]].forEach(([lbl,out,cls])=>{
+        const btn=el("button",cls,lbl);btn.addEventListener("click",async()=>{await setOutcome(a.id,out);if(out!=="noreply"&&out!=="rejected")openWorkspace(a.id);else renderDashboard();});row.append(btn);
+      });
+      item.append(row);b.append(item);
+    });
+  }
+
+  function renderMemory(){
+    const top=topWeaknesses(6); const card=$("memoryCard");
+    if(top.length<2){card.hidden=true;return;}
+    card.hidden=false;
+    card.innerHTML=`<h3>Career memory</h3><p class="mc-note">Recurring weak spots across your applications — Tailor now strengthens these automatically in every new CV.</p>`;
+    const tags=el("div","mem-tags");
+    top.forEach(([t,c])=>{const s=el("span","mem-tag");s.innerHTML=`${esc(t)}<b>×${c}</b>`;tags.append(s);});
+    card.append(tags);
+  }
+
+
   function explainError(e){
     const m=String(e.message||e);
     if(m.includes("GROQ_API_KEY"))return{msg:"Server configuration error — GROQ_API_KEY is not set on the host."};
@@ -500,9 +791,16 @@ Skills: SQL, Excel, Python (pandas, matplotlib), basic statistics. Languages: Bu
     $("sampleBtn").addEventListener("click",()=>{$("jobInput").value=SAMPLE_JOB;$("cvInput").value=SAMPLE_CV;updateCounts();toast("Sample loaded — run the agent.");});
     $("wsImprove").addEventListener("click",()=>openEditor(openId));
     $("wsDelete").addEventListener("click",()=>{if(confirm("Delete this application permanently?")){saveApps(loadApps().filter(x=>x.id!==openId));openDashboard();toast("Application deleted.");}});
-    $("rejectToggle").addEventListener("click",()=>{const a=getApp(openId);a.rejected=!a.rejected;a.updatedAt=Date.now();upsertApp(a);renderWorkspace(a);});
+    $("rejectToggle").addEventListener("click",()=>{const a=normalize(getApp(openId));a.rejected=!a.rejected;a.status=a.rejected?"rejected":"ready";if(!a.rejected&&a.stageIndex>=5)a.stageIndex=4;a.updatedAt=Date.now();upsertApp(a);renderWorkspace(a);});
     $("notesInput").addEventListener("input",()=>{const a=getApp(openId);if(!a)return;a.notes=$("notesInput").value;upsertApp(a);});
+    $("remindBtn").addEventListener("click",()=>ensureReminderPermission(false));
+    $("saveBestBtn").addEventListener("click",()=>{
+      const a=normalize(getApp(openId));const m=loadMemory();
+      m.bestResume={cv:a.analysis?.cv?.data||null,from:a.title+" @ "+a.company,ats:clamp(a.analysis?.ats?.ats_score),ts:Date.now()};
+      saveMemory(m);toast("Saved as your best CV version — future applications will learn from it.");
+    });
     document.querySelectorAll(".copy-btn").forEach(b=>b.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(plainText(b.dataset.copy));toast("Copied.");}catch{toast("Copy failed — select manually.");}}));
+    setTimeout(checkReminders,1500); // local nudge on open if anything is due
   });
 
   /* PWA */
